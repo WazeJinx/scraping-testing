@@ -3,24 +3,62 @@ import { cleanText } from "../../../utils/formatter.js";
 
 export const getVlrResults = async () => {
   const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
+  const context = await browser.newContext({
+    userAgent:
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+      "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    viewport: { width: 1366, height: 768 },
+    locale: "en-US",
+    timezoneId: "UTC",
+    extraHTTPHeaders: {
+      "Accept-Language": "en-US,en;q=0.9",
+    },
+  });
+
+  const page = await context.newPage();
 
   try {
-    await page.goto("https://www.vlr.gg/matches/results");
-    await page.waitForSelector(".match-item", { timeout: 10000 });
+    // Block heavy assets
+    await page.route("**/*", (route) => {
+      const type = route.request().resourceType();
+      if (["image", "font", "media"].includes(type)) return route.abort();
+      return route.continue();
+    });
 
-    const rawResults = await page.$$eval(".match-item", (items) => {
-      return items
+    // Disable animations
+    await page.addInitScript(() => {
+      const style = document.createElement("style");
+      style.textContent = `
+        *, *::before, *::after {
+          transition: none !important;
+          animation: none !important;
+          scroll-behavior: auto !important;
+        }
+      `;
+      document.documentElement.appendChild(style);
+    });
+
+    await page.goto("https://www.vlr.gg/matches/results", {
+      waitUntil: "domcontentloaded",
+      timeout: 30_000,
+    });
+
+    await page.waitForSelector(".match-item", { timeout: 10_000 });
+
+    const rawResults = await page.$$eval(".match-item", (items) =>
+      items
         .map((el) => {
+          // Date
           const dateEls =
             el
               .closest(".col-container")
               ?.querySelectorAll(".wf-label.mod-large") || [];
           let date = "";
           for (let i = dateEls.length - 1; i >= 0; i--) {
-            const rect = dateEls[i].getBoundingClientRect();
-            const matchRect = el.getBoundingClientRect();
-            if (rect.top < matchRect.top) {
+            if (
+              dateEls[i].getBoundingClientRect().top <
+              el.getBoundingClientRect().top
+            ) {
               date = dateEls[i].textContent;
               break;
             }
@@ -46,10 +84,10 @@ export const getVlrResults = async () => {
 
           return { date, teams, scores, status, time, event };
         })
-        .filter(Boolean);
-    });
+        .filter(Boolean)
+    );
 
-    const results = rawResults.map((r) => ({
+    return rawResults.map((r) => ({
       date: cleanText(r.date),
       teamA: cleanText(r.teams[0]),
       teamB: cleanText(r.teams[1]),
@@ -59,12 +97,11 @@ export const getVlrResults = async () => {
       event: cleanText(r.event),
       status: cleanText(r.status),
     }));
-
-    return results;
   } catch (err) {
     console.error(err);
     return [];
   } finally {
+    await context.close();
     await browser.close();
   }
 };

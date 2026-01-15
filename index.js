@@ -16,7 +16,8 @@ await app.register(fastifySwagger, {
   openapi: {
     info: {
       title: "Web Scraping Testing",
-      description: "API info",
+      description:
+        "[Playwright](https://www.scrapingbee.com/blog/playwright-web-scraping/)",
     },
   },
 });
